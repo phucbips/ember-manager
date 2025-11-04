@@ -1,0 +1,5 @@
+{
+  "name": "Embed Manager",
+  "description": "A web application to save, manage, and preview iframe embed codes using Firebase for storage and authentication. Users can add new embeds, view a list of their saved content, copy embed URLs, and preview them in a modal.",
+  "requestFramePermissions": []
+}
