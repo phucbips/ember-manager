@@ -1,40 +1,143 @@
-import { useState, useEffect } from 'react';
-import { onSnapshot } from 'firebase/firestore';
-import { getQuizzesQuery } from '../services/firebaseService';
-import type { Quiz } from '../types';
+import { useState, useEffect } from 'react'
+import { useAuth } from './useAuth'
+import { 
+  getQuizzes, 
+  getQuizzesByUser, 
+  addQuiz, 
+  deleteQuiz,
+  getWhitelist,
+  addToWhitelist,
+  removeFromWhitelist 
+} from './services/supabaseService'
+import type { Quiz, WhitelistEntry } from '../types'
+import toast from 'react-hot-toast'
 
 export const useQuizzes = () => {
-  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user, userRole, isSignedIn } = useAuth()
+  const [quizzes, setQuizzes] = useState<Quiz[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  const fetchQuizzes = async () => {
+    if (!isSignedIn) return
+    
+    setIsLoading(true)
+    try {
+      let data: Quiz[]
+      if (userRole?.isAdmin) {
+        data = await getQuizzes() // Admin sees all quizzes
+      } else {
+        data = await getQuizzesByUser(user!.id) // Users see only their quizzes
+      }
+      setQuizzes(data)
+    } catch (error) {
+      console.error('Error fetching quizzes:', error)
+      toast.error('Failed to load quizzes')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const addNewQuiz = async (embedCode: string) => {
+    if (!user) throw new Error('User not authenticated')
+    
+    try {
+      const result = await addQuiz(
+        user.id, 
+        embedCode, 
+        user.email
+      )
+      await fetchQuizzes() // Refresh the list
+      toast.success('Quiz added successfully!')
+      return result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to add quiz'
+      toast.error(message)
+      throw error
+    }
+  }
+
+  const removeQuiz = async (quizId: string) => {
+    try {
+      await deleteQuiz(quizId)
+      setQuizzes(prev => prev.filter(q => q.id !== quizId))
+      toast.success('Quiz deleted successfully!')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete quiz'
+      toast.error(message)
+      throw error
+    }
+  }
 
   useEffect(() => {
-    setIsLoading(true);
-    const quizzesQuery = getQuizzesQuery();
+    if (isSignedIn) {
+      fetchQuizzes()
+    }
+  }, [isSignedIn, userRole])
+
+  return {
+    quizzes,
+    isLoading,
+    addQuiz: addNewQuiz,
+    deleteQuiz: removeQuiz,
+    refetch: fetchQuizzes,
+  }
+}
+
+export const useWhitelist = () => {
+  const { userRole } = useAuth()
+  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  const fetchWhitelist = async () => {
+    if (!userRole?.isAdmin) return
     
-    const unsubscribe = onSnapshot(
-      quizzesQuery,
-      (snapshot) => {
-        const quizData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        } as Quiz));
-        
-        quizData.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
-        
-        setQuizzes(quizData);
-        setError(null);
-        setIsLoading(false);
-      },
-      (err) => {
-        console.error("Firestore listener error in useQuizzes:", err);
-        setError(`Error loading data: ${err.message}`);
-        setIsLoading(false);
-      }
-    );
+    setIsLoading(true)
+    try {
+      const data = await getWhitelist()
+      setWhitelist(data)
+    } catch (error) {
+      console.error('Error fetching whitelist:', error)
+      toast.error('Failed to load whitelist')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-    return () => unsubscribe();
-  }, []);
+  const addEmailToWhitelist = async (email: string) => {
+    try {
+      await addToWhitelist(email)
+      await fetchWhitelist()
+      toast.success('Email added to whitelist successfully!')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to add email to whitelist'
+      toast.error(message)
+      throw error
+    }
+  }
 
-  return { quizzes, isLoading, error };
-};
+  const removeEmailFromWhitelist = async (email: string) => {
+    try {
+      await removeFromWhitelist(email)
+      await fetchWhitelist()
+      toast.success('Email removed from whitelist successfully!')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to remove email from whitelist'
+      toast.error(message)
+      throw error
+    }
+  }
+
+  useEffect(() => {
+    if (userRole?.isAdmin) {
+      fetchWhitelist()
+    }
+  }, [userRole])
+
+  return {
+    whitelist,
+    isLoading,
+    addToWhitelist: addEmailToWhitelist,
+    removeFromWhitelist: removeEmailFromWhitelist,
+    refetch: fetchWhitelist,
+  }
+}
